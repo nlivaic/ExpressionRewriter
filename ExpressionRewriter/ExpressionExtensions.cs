@@ -17,32 +17,8 @@ namespace ExpressionRewriter
 
         public static IQueryable<T> Expand<T>(this IQueryable<T> query)
         {
-            var queryExpr = query.Expression as MethodCallExpression;
-            MethodCallExpression methodExpr = null;
-            UnaryExpression quoteExpr = null;
-            LambdaExpression lambda = null;
-            IQueryable<T> rewrittenQuery = null;
-            foreach (var expression in queryExpr.Arguments)
-            {
-                switch (expression.NodeType)
-                {
-                    case ExpressionType.Call:       // .Where
-                        methodExpr = expression as MethodCallExpression;
-                        quoteExpr = methodExpr.Arguments[1] as UnaryExpression;
-                        lambda = quoteExpr.Operand as LambdaExpression;
-                        var rewrittenLambda = Visitor.CreateFromExpression(lambda).Visit("") as LambdaExpression;
-                        rewrittenQuery = ctx.Orders.Where((Expression<Func<T, bool>>)rewrittenLambda);
-
-                        break;
-                    case ExpressionType.Quote:
-                        quoteExpr = expression as UnaryExpression;
-                        lambda = quoteExpr.Operand as LambdaExpression;
-                        rewrittenQuery = rewrittenQuery.Select(o => o);
-                        break;
-                }
-                //     var nodeType = expression.NodeType;
-            }
-            return rewrittenQuery;
+						var rewrittenExpression = Visitor.CreateFromExpression(query.Expression).Visit("");
+						return query.Provider.CreateQuery<T>(rewrittenExpression);
         }
     }
 }

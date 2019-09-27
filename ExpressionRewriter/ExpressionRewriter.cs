@@ -38,7 +38,11 @@ namespace ExpressionRewriter
                     return new CallVisitor((MethodCallExpression)node);
                 case ExpressionType.MemberAccess:
                     return new MemberAccessVisitor((MemberExpression)node);
-                default:
+								case ExpressionType.Quote:
+									return new UnaryVisitor((UnaryExpression)node);
+								case ExpressionType.New:
+									return new NewVisitor((NewExpression)node);
+				default:
                     throw new ArgumentException($"Unknown/unsupported expression node type: ${node.NodeType}.");
             }
         }
@@ -46,7 +50,7 @@ namespace ExpressionRewriter
         public abstract Expression VisitAndReplace(string prefix, List<ParameterExpressionReplacement> replacements);
     }
 
-    public class LambdaVisitor : Visitor
+		public class LambdaVisitor : Visitor
     {
         private LambdaExpression _lambdaExpression;
 
@@ -241,31 +245,40 @@ namespace ExpressionRewriter
         {
             Console.WriteLine($"{prefix} This is a {NodeType} expression.");
             MethodInfo methodInfo = _methodCallExpression.Method;
-            if (!(methodInfo.Name == nameof(ExpressionExtensions.Call) &&
-                _methodCallExpression.Method.DeclaringType.Name == nameof(ExpressionExtensions)))
+            if (methodInfo.Name == nameof(ExpressionExtensions.Call) &&
+                _methodCallExpression.Method.DeclaringType.Name == nameof(ExpressionExtensions))
             {
-                throw new Exception($"Only {nameof(ExpressionExtensions.Call)} is callable from within an expression tree context.");
-            }
-            // .Call() is an extension method. 
-            // First argument is the method we want to expand.
-            // Other arguments are to be passed to the delegate.
-            var methodToExpand = (MethodCallExpression)_methodCallExpression.Arguments[0];
-            var lambdaToExpand = (LambdaExpression)methodToExpand.Method.Invoke(null, null);
-            // The rest of the arguments are meant for the expanded method.
-            // We have to replace any parameter in the expanded method's body with 
-            // arguments provided to .Call().
-            var replacements = new List<ParameterExpressionReplacement>();
-            for (int i = 0; i < lambdaToExpand.Parameters.Count; i++)
-            {
-                var paramToExpand = lambdaToExpand.Parameters[i];
-                var expandedMethodParam0 = /*(ParameterExpression) */_methodCallExpression.Arguments[i + 1];
-                replacements.Add(new ParameterExpressionReplacement(paramToExpand, expandedMethodParam0));
-            }
-            //return Expression.GreaterThan(expandedMethodParam0, ((BinaryExpression)exprToExpand.Body).Right);
-            return CreateFromExpression(lambdaToExpand).VisitAndReplace(
-                "\t[Replacement]" + prefix,
-                replacements
-            );
+							// .Call() is an extension method. 
+							// First argument is the method we want to expand.
+							// Other arguments are to be passed to the delegate.
+							var methodToExpand = (MethodCallExpression)_methodCallExpression.Arguments[0];
+							var lambdaToExpand = (LambdaExpression)methodToExpand.Method.Invoke(null, null);
+							// The rest of the arguments are meant for the expanded method.
+							// We have to replace any parameter in the expanded method's body with 
+							// arguments provided to .Call().
+							var replacements = new List<ParameterExpressionReplacement>();
+							for (int i = 0; i < lambdaToExpand.Parameters.Count; i++)
+							{
+								var paramToExpand = lambdaToExpand.Parameters[i];
+								var expandedMethodParam0 = /*(ParameterExpression) */_methodCallExpression.Arguments[i + 1];
+								replacements.Add(new ParameterExpressionReplacement(paramToExpand, expandedMethodParam0));
+							}
+							//return Expression.GreaterThan(expandedMethodParam0, ((BinaryExpression)exprToExpand.Body).Right);
+							return CreateFromExpression(lambdaToExpand).VisitAndReplace(
+									"\t[Replacement]" + prefix,
+									replacements
+							);
+						}
+						else
+						{
+							List<Expression> rewrittenArgs = new List<Expression>();
+							foreach (var arg in _methodCallExpression.Arguments)
+							{
+								var currentArg = CreateFromExpression(arg).Visit("\t" + prefix);
+								rewrittenArgs.Add(currentArg);
+							}
+							return Expression.Call(null, _methodCallExpression.Method, rewrittenArgs);
+						}
         }
 
         public override Expression VisitAndReplace(string prefix, List<ParameterExpressionReplacement> replacements)
@@ -293,7 +306,51 @@ namespace ExpressionRewriter
         public override Expression VisitAndReplace(string prefix, List<ParameterExpressionReplacement> replacements) => _memberExpression;
     }
 
-    public class ParameterExpressionReplacement
+		internal class UnaryVisitor : Visitor
+		{
+			private UnaryExpression _unaryExpression;
+
+			public UnaryVisitor(UnaryExpression node) : base(node)
+			{
+				_unaryExpression = node;
+			}
+
+		public override Expression Visit(string prefix)
+		{
+			return CreateFromExpression(_unaryExpression.Operand).Visit("\t");
+		}
+
+		public override Expression VisitAndReplace(string prefix, List<ParameterExpressionReplacement> replacements)
+		{
+			throw new NotImplementedException();
+		}
+	}
+
+	public class NewVisitor : Visitor
+	{
+		private NewExpression _newExpression;
+		public NewVisitor(NewExpression node) : base(node)
+		{
+			_newExpression = node;
+		}
+
+		public override Expression Visit(string prefix)
+		{
+			List<Expression> rewrittenArgs = new List<Expression>();
+			foreach (var arg in _newExpression.Arguments)
+			{
+				rewrittenArgs.Add(CreateFromExpression(arg).Visit(""));
+			}
+			return Expression.New(_newExpression.Constructor, rewrittenArgs);
+		}
+
+		public override Expression VisitAndReplace(string prefix, List<ParameterExpressionReplacement> replacements)
+		{
+			throw new NotImplementedException();
+		}
+	}
+
+	public class ParameterExpressionReplacement
     {
         public ParameterExpression OriginalParameterExpr { get; set; }
         public /*Parameter*/Expression ReplacementParameterExpr { get; set; }
